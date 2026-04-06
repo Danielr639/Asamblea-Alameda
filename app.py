@@ -2,34 +2,22 @@ import streamlit as st
 import pandas as pd
 import os
 
-# --- CONFIGURACIÓN DE ARCHIVOS ---
-# Estos archivos guardan la memoria de la asamblea en el servidor
-ARCHIVO_VOTOS = "votos_alameda.csv"
-ARCHIVO_CONTROL = "control_asamblea.txt"
-
-def inicializar_archivos():
-    if not os.path.exists(ARCHIVO_VOTOS):
-        pd.DataFrame(columns=["casa", "pregunta", "voto"]).to_csv(ARCHIVO_VOTOS, index=False)
-    if not os.path.exists(ARCHIVO_CONTROL):
-        with open(ARCHIVO_CONTROL, "w") as f:
-            f.write("0|False") # Pregunta 0, Resultados ocultos
-
-def guardar_control(id_p, ver_res):
-    with open(ARCHIVO_CONTROL, "w") as f:
-        f.write(f"{id_p}|{ver_res}")
-
-def leer_control():
-    if not os.path.exists(ARCHIVO_CONTROL):
-        return 0, False
-    with open(ARCHIVO_CONTROL, "r") as f:
-        data = f.read().split("|")
-        return int(data[0]), data[1] == "True"
-
-# --- INICIO DE APP ---
+# --- CONFIGURACIÓN DE PÁGINA ---
 st.set_page_config(page_title="Asamblea Alameda 7", page_icon="🏢")
-inicializar_archivos()
 
-# Preguntas
+# --- MEMORIA COMPARTIDA (Sincronización Real entre dispositivos) ---
+@st.cache_resource
+def obtener_memoria_comun():
+    # Esta estructura vive en el servidor y todos los usuarios la comparten
+    return {
+        "pregunta_activa": 0,
+        "mostrar_resultados": False,
+        "votos_globales": pd.DataFrame(columns=["casa", "pregunta_id", "voto"])
+    }
+
+memoria = obtener_memoria_comun()
+
+# --- DATOS ---
 preguntas = [
     "1. ¿Aprueba la elección del Consejo de Administración por planchas?",
     "2. ¿Aprueba la elección del Comité de Convivencia por planchas?",
@@ -41,100 +29,99 @@ preguntas = [
     "8. ¿Acuerda el encerramiento de la malla del parqueadero?"
 ]
 
-# Logo
-if os.path.exists("image_f94506.jpg"):
-    st.image("image_f94506.jpg", use_container_width=True)
+# --- LOGO ---
+logo_path = "image_f94506.jpg"
+if os.path.exists(logo_path):
+    st.image(logo_path, use_container_width=True)
 
 st.divider()
 
-# Navegación
-rol = st.sidebar.radio("MENÚ PRINCIPAL", ["Votante (Vecino)", "Administrador"])
+# --- NAVEGACIÓN ---
+rol = st.sidebar.radio("MENÚ", ["Votante", "Administrador"])
 
-# --- VISTA ADMINISTRADOR ---
+# --- MODO ADMINISTRADOR ---
 if rol == "Administrador":
     st.header("👨‍💼 Panel de Mando")
-    clave = st.text_input("Contraseña de Acceso:", type="password")
+    clave = st.text_input("Contraseña:", type="password")
     
     if clave == "Alameda2026*":
-        st.success("Conectado como Administrador")
+        st.subheader("Control de Preguntas")
         
-        # Leemos el estado actual para que el selector no se mueva solo
-        p_actual, res_actual = leer_control()
+        # Selector de pregunta
+        nueva_p = st.selectbox("Seleccione Pregunta para lanzar:", 
+                               range(len(preguntas)), 
+                               index=memoria["pregunta_activa"],
+                               format_func=lambda x: preguntas[x])
         
-        st.subheader("Control de la Asamblea")
-        nueva_p = st.selectbox("1. Seleccionar Pregunta:", range(len(preguntas)), index=p_actual, format_func=lambda x: preguntas[x])
-        mostrar_graficos = st.checkbox("2. ¿Mostrar resultados a los vecinos?", value=res_actual)
+        # Interruptor de resultados
+        ver_res = st.toggle("Publicar Gráficos de Resultados", value=memoria["mostrar_resultados"])
         
-        # BOTÓN MAESTRO
-        if st.button("🚀 ACTUALIZAR PARA TODOS LOS CELULARES", type="primary", use_container_width=True):
-            guardar_control(nueva_p, mostrar_graficos)
-            st.toast("¡Sincronizando con todos los dispositivos!")
+        if st.button("🚀 ACTUALIZAR ASAMBLEA (Sincronizar todos los celulares)", type="primary"):
+            memoria["pregunta_activa"] = nueva_p
+            memoria["mostrar_resultados"] = ver_res
+            st.success(f"Sincronizado: Pregunta {nueva_p + 1} activa.")
             st.rerun()
 
         st.divider()
-        st.subheader("📥 Reporte de Votos")
-        df_votos = pd.read_csv(ARCHIVO_VOTOS)
-        if not df_votos.empty:
-            st.dataframe(df_votos.tail(10)) # Muestra los últimos 10 votos
-            csv = df_votos.to_csv(index=False).encode('utf-8')
-            st.download_button("Descargar Excel de Votos", data=csv, file_name="votos_alameda.csv")
+        st.subheader("📊 Consolidado de Votos")
+        st.dataframe(memoria["votos_globales"])
         
-        if st.button("⚠️ REINICIAR TODA LA VOTACIÓN (BORRAR TODO)"):
-            pd.DataFrame(columns=["casa", "pregunta", "voto"]).to_csv(ARCHIVO_VOTOS, index=False)
-            guardar_control(0, False)
-            st.rerun()
+        if not memoria["votos_globales"].empty:
+            csv = memoria["votos_globales"].to_csv(index=False).encode('utf-8')
+            st.download_button("📥 Descargar Reporte Excel", data=csv, file_name="votos_alameda7.csv")
 
-# --- VISTA VOTANTE ---
+# --- MODO VOTANTE ---
 else:
-    # 1. Leer qué orden dio el administrador
-    p_activa_id, ver_resultados = leer_control()
-    
-    # 2. Pedir identificación una sola vez
-    if 'mi_casa' not in st.session_state:
+    # 1. Identificación de Casa (Se guarda en el navegador del vecino)
+    if 'casa_id' not in st.session_state:
         st.subheader("Bienvenido")
-        casa_input = st.text_input("🏠 Ingrese su Número de Casa:").strip()
-        if st.button("Entrar a Votar", use_container_width=True):
-            if casa_input:
-                st.session_state.mi_casa = casa_input
+        id_input = st.text_input("🏠 Ingrese su Número de Casa:").strip()
+        if st.button("Entrar a Votar"):
+            if id_input:
+                st.session_state.casa_id = id_input
                 st.rerun()
     else:
-        casa = st.session_state.mi_casa
-        st.sidebar.info(f"Sesión iniciada: Casa {casa}")
+        casa = st.session_state.casa_id
+        p_id = memoria["pregunta_activa"]
+        
+        st.sidebar.info(f"Casa: {casa}")
         if st.sidebar.button("Cerrar Sesión"):
-            del st.session_state.mi_casa
+            del st.session_state.casa_id
             st.rerun()
 
-        # 3. Mostrar la pregunta actual
-        st.subheader(f"Pregunta {p_activa_id + 1}")
-        st.markdown(f"**{preguntas[p_activa_id]}**")
-        
-        # Consultar votos reales
-        df_votos = pd.read_csv(ARCHIVO_VOTOS)
-        ya_voto = not df_votos[(df_votos['casa'].astype(str) == casa) & (df_votos['pregunta'] == preguntas[p_activa_id])].empty
-        
-        if ver_resultados:
-            st.success("📊 Resultados en Vivo")
-            resumen = df_votos[df_votos['pregunta'] == preguntas[p_activa_id]]['voto'].value_counts()
-            if not resumen.empty:
-                st.bar_chart(resumen)
+        # 2. Mostrar Pregunta Actual
+        st.subheader(f"Pregunta {p_id + 1}")
+        st.info(preguntas[p_id])
+
+        # 3. Lógica de Votación
+        df_votos = memoria["votos_globales"]
+        # Filtramos para ver si ESTA casa ya votó en ESTA pregunta específica
+        ya_voto = not df_votos[(df_votos['casa'] == casa) & (df_votos['pregunta_id'] == p_id)].empty
+
+        if memoria["mostrar_resultados"]:
+            st.success("📊 Resultados en Tiempo Real")
+            conteo = df_votos[df_votos['pregunta_id'] == p_id]['voto'].value_counts()
+            if not conteo.empty:
+                st.bar_chart(conteo)
             else:
-                st.write("No hay votos registrados para esta pregunta.")
-            if st.button("🔄 Actualizar"): st.rerun()
+                st.write("Aún no hay votos en esta pregunta.")
+            if st.button("🔄 Actualizar Gráfico"): st.rerun()
 
         elif ya_voto:
-            st.warning(f"Casa {casa}, su voto ya fue recibido. Por favor, espere la siguiente pregunta.")
+            st.warning("✅ Voto registrado. Espere a que el administrador lance la siguiente pregunta.")
             if st.button("🔄 Buscar Nueva Pregunta"): st.rerun()
-        
+
         else:
-            col1, col2 = st.columns(2)
-            with col1:
-                if st.button("✅ SÍ", use_container_width=True):
-                    nuevo = pd.DataFrame([{"casa": casa, "pregunta": preguntas[p_activa_id], "voto": "SÍ"}])
-                    nuevo.to_csv(ARCHIVO_VOTOS, mode='a', header=False, index=False)
+            st.write("Seleccione su respuesta:")
+            c1, c2 = st.columns(2)
+            with c1:
+                if st.button("👍 SÍ", use_container_width=True):
+                    nuevo_voto = pd.DataFrame([{"casa": casa, "pregunta_id": p_id, "voto": "SÍ"}])
+                    memoria["votos_globales"] = pd.concat([memoria["votos_globales"], nuevo_voto], ignore_index=True)
                     st.balloons()
                     st.rerun()
-            with col2:
-                if st.button("❌ NO", use_container_width=True):
-                    nuevo = pd.DataFrame([{"casa": casa, "pregunta": preguntas[p_activa_id], "voto": "NO"}])
-                    nuevo.to_csv(ARCHIVO_VOTOS, mode='a', header=False, index=False)
+            with c2:
+                if st.button("👎 NO", use_container_width=True):
+                    nuevo_voto = pd.DataFrame([{"casa": casa, "pregunta_id": p_id, "voto": "NO"}])
+                    memoria["votos_globales"] = pd.concat([memoria["votos_globales"], nuevo_voto], ignore_index=True)
                     st.rerun()
