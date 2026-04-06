@@ -3,14 +3,15 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import os
 
-# --- 1. CONFIGURACIÓN ---
-st.set_page_config(page_title="Asamblea Alameda 7", page_icon="🏢")
+# --- 1. CONFIGURACIÓN DE PÁGINA ---
+st.set_page_config(page_title="Asamblea Alameda 7", page_icon="🏢", layout="centered")
 
-# --- 2. MEMORIA GLOBAL (Sincroniza a los 184 usuarios) ---
+# --- 2. MEMORIA GLOBAL COMPARTIDA (Sincroniza a todos los usuarios) ---
 @st.cache_resource
 def iniciar_servidor():
     return {
-        "fase": "espera", 
+        "asamblea_iniciada": False,
+        "fase": "espera", # espera, votacion, resultados
         "p_idx": 0,
         "votos": pd.DataFrame(columns=["casa", "p_id", "voto"]),
         "conectados": set() 
@@ -24,14 +25,12 @@ preguntas = [
     "2. ¿Aprueba la elección del Comité de Convivencia por planchas?",
     "3. ¿Autoriza la pintura de la fachada de ladrillo?",
     "4. ¿Está de acuerdo con la 'cerca viva' entre etapas?",
-    "5. ¿Aprueba el nuevo Manual de Convivencia?",
+    "5. ¿Aprueba el contenido del nuevo Manual de Convivencia?",
     "6. ¿Aprueba el decomiso preventivo de objetos en zonas comunes?",
     "7. ¿Aprueba la cuota extraordinaria para canales de desagüe?",
     "8. ¿Acuerda el encerramiento de la malla del parqueadero?",
     "9. ¿De estas tres opciones de cuota de administración está de acuerdo?"
 ]
-
-# Opciones para la pregunta 9
 opciones_p9 = ["70.000", "75.000", "85.000"]
 
 # --- 4. LOGO ---
@@ -44,12 +43,12 @@ else:
 st.divider()
 
 # --- 5. NAVEGACIÓN ---
-rol = st.sidebar.radio("SISTEMA DE ASAMBLEA", ["Votante", "Administrador"])
+rol = st.sidebar.radio("SISTEMA DE ASAMBLEA", ["Votante (Copropietario)", "Administrador"])
 
 # --- VISTA ADMINISTRADOR ---
 if rol == "Administrador":
     st.header("👨‍💼 Panel de Mando (Admin)")
-    clave = st.text_input("Contraseña:", type="password")
+    clave = st.text_input("Contraseña Maestro:", type="password")
     
     if clave == "Alameda2026*":
         st.success("Control Maestro Activo")
@@ -61,50 +60,64 @@ if rol == "Administrador":
         
         st.divider()
         
-        # CONTROL DE FLUJO
-        st.subheader("Control de Preguntas")
-        sel_p = st.selectbox("Seleccione Pregunta para gestionar:", range(len(preguntas)), 
-                             index=servidor['p_idx'], format_func=lambda x: preguntas[x])
-        
-        col_admin1, col_admin2 = st.columns(2)
-        with col_admin1:
-            if st.button("🚀 LANZAR PREGUNTA", type="primary", use_container_width=True):
-                servidor['p_idx'] = sel_p
-                servidor['fase'] = "votacion"
+        # INICIO DE ASAMBLEA
+        if not servidor["asamblea_iniciada"]:
+            if st.button("🚀 INICIAR ASAMBLEA GENERAL", type="primary", use_container_width=True):
+                servidor["asamblea_iniciada"] = True
                 st.rerun()
-        with col_admin2:
-            if st.button("📊 PUBLICAR RESULTADOS", use_container_width=True):
-                servidor['fase'] = "resultados"
-                st.rerun()
-
-        # MONITOR DE GRÁFICAS PARA EL ADMIN
-        st.divider()
-        st.subheader(f"📈 Gráfica en Vivo (Pregunta {sel_p + 1})")
-        df_admin = servidor['votos']
-        res_admin = df_admin[df_admin['p_id'] == sel_p]['voto'].value_counts()
-        
-        if not res_admin.empty:
-            fig_admin, ax_admin = plt.subplots(figsize=(6, 4))
-            # Colores dinámicos (Verde/Rojo para Si/No, o Colores Variados para P9)
-            colores = ['#2ecc71', '#e74c3c', '#3498db'] if sel_p == 8 else ['#2ecc71', '#e74c3c']
-            ax_admin.pie(res_admin, labels=res_admin.index, autopct='%1.1f%%', startangle=90, colors=colores[:len(res_admin)])
-            ax_admin.axis('equal')
-            st.pyplot(fig_admin)
-            st.write(f"Total votos recibidos: {res_admin.sum()}")
         else:
-            st.info("Esperando votos para mostrar gráfica...")
+            # CONTROL DE PREGUNTAS
+            st.subheader("Control de Flujo")
+            sel_p = st.selectbox("Seleccione Pregunta para gestionar:", range(len(preguntas)), 
+                                 index=servidor['p_idx'], format_func=lambda x: preguntas[x])
+            
+            c_admin1, c_admin2 = st.columns(2)
+            with c_admin1:
+                if st.button("📢 LANZAR PREGUNTA", type="primary", use_container_width=True):
+                    servidor['p_idx'] = sel_p
+                    servidor['fase'] = "votacion"
+                    st.rerun()
+            with c_admin2:
+                if st.button("📊 PUBLICAR RESULTADOS", use_container_width=True):
+                    servidor['fase'] = "resultados"
+                    st.rerun()
 
-        # EXPORTAR EXCEL
-        if not servidor['votos'].empty:
-            csv = servidor['votos'].to_csv(index=False).encode('utf-8')
-            st.download_button("📥 Descargar Reporte de Votos (CSV/Excel)", data=csv, file_name="reporte_asamblea.csv")
+            # MONITOR DE GRÁFICAS PARA EL ADMIN
+            st.divider()
+            st.subheader(f"📈 Gráfica en Vivo (Pregunta {sel_p + 1})")
+            df_votos = servidor['votos']
+            res_admin = df_votos[df_votos['p_id'] == sel_p]['voto'].value_counts()
+            
+            if not res_admin.empty:
+                fig_admin, ax_admin = plt.subplots(figsize=(6, 4))
+                colores = ['#2ecc71', '#e74c3c', '#3498db'] if sel_p == 8 else ['#2ecc71', '#e74c3c']
+                ax_admin.pie(res_admin, labels=res_admin.index, autopct='%1.1f%%', startangle=90, colors=colores[:len(res_admin)])
+                ax_admin.axis('equal')
+                st.pyplot(fig_admin)
+            else:
+                st.info("Esperando votos...")
+
+            # TABLA DINÁMICA (MATRIZ)
+            st.divider()
+            st.subheader("📋 Matriz de Votos por Casa")
+            if not df_votos.empty:
+                try:
+                    pivot = df_votos.pivot(index='casa', columns='p_id', values='voto')
+                    pivot.columns = [f"P{i+1}" for i in pivot.columns]
+                    st.dataframe(pivot.fillna("-"))
+                except:
+                    st.write("Cargando matriz...")
+                
+                csv = df_votos.to_csv(index=False).encode('utf-8')
+                st.download_button("📥 Descargar Reporte Excel (CSV)", data=csv, file_name="votos_asamblea.csv")
 
 # --- VISTA VOTANTE ---
 else:
+    # 1. Identificación (Solo una vez)
     if 'mi_casa' not in st.session_state:
         st.subheader("Registro de Ingreso")
-        c_in = st.text_input("Número de Casa (1-184):").strip()
-        if st.button("Entrar"):
+        c_in = st.text_input("🏠 Número de Casa (1-184):").strip()
+        if st.button("Entrar a la Asamblea", use_container_width=True):
             if c_in:
                 st.session_state.mi_casa = c_in
                 servidor['conectados'].add(c_in)
@@ -114,14 +127,19 @@ else:
         fase = servidor['fase']
         p_id = servidor['p_idx']
         
-        st.sidebar.info(f"Casa: {casa}")
-        if st.sidebar.button("Cerrar Sesión"):
+        st.sidebar.info(f"Conectado: Casa {casa}")
+        if st.sidebar.button("Cambiar de Casa"):
             del st.session_state.mi_casa
             st.rerun()
 
-        if fase == "espera":
-            st.warning("⏳ Esperando que la Administración lance la pregunta...")
+        # Lógica de espera o votación
+        if not servidor["asamblea_iniciada"]:
+            st.warning("⏳ La asamblea aún no ha iniciado. Por favor, espere indicaciones.")
             if st.button("🔄 Actualizar"): st.rerun()
+        
+        elif fase == "espera":
+            st.info("⌛ El administrador está preparando la siguiente pregunta...")
+            if st.button("🔄 Buscar Pregunta"): st.rerun()
             
         else:
             st.subheader(f"Pregunta {p_id + 1}")
@@ -131,7 +149,7 @@ else:
             ya_voto = not df[(df['casa'] == casa) & (df['p_id'] == p_id)].empty
             
             if fase == "resultados":
-                st.success("📊 RESULTADOS CONSOLIDADOS")
+                st.success("📊 RESULTADOS CONSOLIDADOS (%)")
                 res = df[df['p_id'] == p_id]['voto'].value_counts()
                 if not res.empty:
                     fig, ax = plt.subplots()
@@ -140,34 +158,34 @@ else:
                     ax.axis('equal')
                     st.pyplot(fig)
                 else:
-                    st.write("No hubo votos.")
+                    st.write("Aún no hay votos.")
                 if st.button("🔄 Actualizar"): st.rerun()
 
             elif ya_voto:
-                st.warning("✅ Voto registrado. Espere la siguiente instrucción.")
-                if st.button("🔄 Buscar nueva pregunta"): st.rerun()
+                st.warning("✅ Su voto ha sido registrado. Espere la siguiente pregunta.")
+                if st.button("🔄 Buscar Nueva Pregunta"): st.rerun()
             
             elif fase == "votacion":
-                # --- LÓGICA DIFERENTE PARA PREGUNTA 9 ---
-                if p_id == 8: # Índice 8 es la Pregunta 9
-                    st.write("Elija una de las tres opciones:")
-                    for opcion in opciones_p9:
-                        if st.button(f"Opción: {opcion}", use_container_width=True):
-                            nueva_fila = pd.DataFrame([{"casa": casa, "p_id": p_id, "voto": opcion}])
-                            servidor['votos'] = pd.concat([servidor['votos'], nueva_fila], ignore_index=True)
+                # OPCIONES PREGUNTA 9
+                if p_id == 8:
+                    st.write("Elija una cuota:")
+                    for op in opciones_p9:
+                        if st.button(f"Cuota de {op}", use_container_width=True):
+                            nueva = pd.DataFrame([{"casa": casa, "p_id": p_id, "voto": op}])
+                            servidor['votos'] = pd.concat([servidor['votos'], nueva], ignore_index=True)
                             st.balloons()
                             st.rerun()
-                # --- LÓGICA NORMAL (SÍ/NO) PARA 1-8 ---
+                # OPCIONES NORMALES SÍ/NO
                 else:
                     c1, c2 = st.columns(2)
                     with c1:
                         if st.button("✅ SÍ", use_container_width=True):
-                            nueva_fila = pd.DataFrame([{"casa": casa, "p_id": p_id, "voto": "SÍ"}])
-                            servidor['votos'] = pd.concat([servidor['votos'], nueva_fila], ignore_index=True)
+                            nueva = pd.DataFrame([{"casa": casa, "p_id": p_id, "voto": "SÍ"}])
+                            servidor['votos'] = pd.concat([servidor['votos'], nueva], ignore_index=True)
                             st.balloons()
                             st.rerun()
                     with c2:
                         if st.button("❌ NO", use_container_width=True):
-                            nueva_fila = pd.DataFrame([{"casa": casa, "p_id": p_id, "voto": "NO"}])
-                            servidor['votos'] = pd.concat([servidor['votos'], nueva_fila], ignore_index=True)
+                            nueva = pd.DataFrame([{"casa": casa, "p_id": p_id, "voto": "NO"}])
+                            servidor['votos'] = pd.concat([servidor['votos'], nueva], ignore_index=True)
                             st.rerun()
