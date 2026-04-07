@@ -47,12 +47,12 @@ else:
 st.divider()
 
 # --- 5. NAVEGACIÓN ---
-rol = st.sidebar.radio("SISTEMA DE ASAMBLEA", ["Votante", "Administrador"])
+rol = st.sidebar.radio("SISTEMA DE ASAMBLEA", ["Votante", "Administrador"], key="nav_main")
 
 # --- VISTA ADMINISTRADOR ---
 if rol == "Administrador":
     st.header("👨‍💼 Panel de Mando (Admin)")
-    clave = st.text_input("Contraseña Maestro:", type="password", key="admin_pwd")
+    clave = st.text_input("Contraseña Maestro:", type="password", key="admin_pwd_login")
     
     if clave == "Alameda2026*":
         casas_presentes = sum(servidor["conectados"].values())
@@ -61,142 +61,41 @@ if rol == "Administrador":
         st.progress(min(porcentaje_quorum / 100, 1.0))
         
         if not servidor["asamblea_iniciada"]:
-            if st.button("🚀 INICIAR ASAMBLEA", type="primary", use_container_width=True):
+            if st.button("🚀 INICIAR ASAMBLEA", type="primary", use_container_width=True, key="btn_init_asamblea"):
                 servidor["asamblea_iniciada"] = True
                 st.rerun()
         else:
             sel_p = st.selectbox("Gestionar Pregunta:", range(len(preguntas)), 
-                                 index=servidor['p_idx'], format_func=lambda x: preguntas[x])
-            segundos = st.slider("Segundos de votación:", 30, 300, 60)
+                                 index=servidor['p_idx'], format_func=lambda x: preguntas[x], key="sel_preg_admin")
+            segundos = st.slider("Segundos de votación:", 30, 300, 60, key="slider_sec_admin")
             
             c1, c2 = st.columns(2)
             with c1:
-                if st.button("📢 LANZAR PREGUNTA", type="primary", use_container_width=True):
+                if st.button("📢 LANZAR PREGUNTA", type="primary", use_container_width=True, key="btn_lanzar_admin"):
                     servidor['p_idx'] = sel_p
                     servidor['fase'] = "votacion"
                     servidor['tiempo_cierre'] = datetime.now() + timedelta(seconds=segundos)
                     st.rerun()
             with c2:
-                if st.button("📊 VER RESULTADOS", use_container_width=True):
+                if st.button("📊 VER RESULTADOS", use_container_width=True, key="btn_res_admin"):
                     servidor['fase'] = "resultados"
                     st.rerun()
 
-            # MONITOR DE GRÁFICAS
+            # MONITOR DE GRÁFICAS (ADMIN)
             df_v = servidor['votos']
             votos_act = df_v[df_v['p_id'] == sel_p]
             if not votos_act.empty:
                 res_sum = votos_act.groupby('voto')['representa'].sum()
                 fig, ax = plt.subplots(figsize=(5,3))
-                # Definición de colores corregida
-                if sel_p == 8:
-                    colores_grafica = ['#2ecc71', '#e74c3c', '#3498db']
-                else:
-                    colores_grafica = ['#2ecc71', '#e74c3c']
-                
-                ax.pie(res_sum, labels=res_sum.index, autopct='%1.1f%%', startangle=90, colors=colores_grafica[:len(res_sum)])
-                ax.axis('equal')
-                st.pyplot(fig)
-                
-                with st.expander("Ver Matriz de Votos"):
-                    pivot = df_v.pivot(index='casa', columns='p_id', values='voto')
-                    pivot.columns = [f"P{i+1}" for i in pivot.columns]
-                    st.dataframe(pivot.fillna("-"))
-            
-            csv = df_v.to_csv(index=False).encode('utf-8')
-            st.download_button("📥 Descargar Reporte", data=csv, file_name="votos_alameda.csv")
 
-# --- VISTA VOTANTE ---
-else:
-    if 'mi_casa' not in st.session_state:
-        st.subheader("Registro de Copropietario")
-        c_in = st.text_input("Número de Casa:", key="input_casa_log").strip()
-        poderes = st.number_input("¿Cuántas casas representa?", 1, 10, 1, key="input_poder_log")
-        
-        if st.button("Entrar a la Asamblea", type="primary", use_container_width=True):
-            if c_in:
-                st.session_state.mi_casa = c_in
-                st.session_state.num_votos = poderes
-                servidor['conectados'][c_in] = poderes
-                st.rerun()
-    else:
-        casa = st.session_state.mi_casa
-        repre = st.session_state.num_votos
-        fase = servidor['fase']
-        p_id = servidor['p_idx']
-        
-        st.sidebar.info(f"Casa: {casa} | Votos: {repre}")
-        if st.sidebar.button("Cerrar Sesión"):
-            del st.session_state.mi_casa
-            st.rerun()
-
-        if not servidor["asamblea_iniciada"]:
-            st.warning("⏳ Esperando inicio...")
-            time.sleep(3)
-            st.rerun()
-            
-        elif fase == "espera":
-            st.info("⌛ Preparando siguiente pregunta...")
-            time.sleep(3)
-            st.rerun()
-            
-        else:
-            st.subheader(f"Pregunta {p_id + 1}")
-            st.markdown(f"**{preguntas[p_id]}**")
-            
-            reloj_area = st.empty()
-            df = servidor['votos']
-            ya_voto = not df[(df['casa'] == casa) & (df['p_id'] == p_id)].empty
-            
-            restante = 0
-            if fase == "votacion" and servidor['tiempo_cierre']:
-                restante = (servidor['tiempo_cierre'] - datetime.now()).total_seconds()
-
-            if fase == "resultados":
-                votos_p = df[df['p_id'] == p_id]
-                if not votos_p.empty:
-                    res_sum = votos_p.groupby('voto')['representa'].sum()
-                    fig, ax = plt.subplots()
-                    if p_id == 8:
-                        cols = ['#2ecc71', '#e74c3c', '#3498db']
-                    else:
-                        cols = ['#2ecc71', '#e74c3c']
-                    ax.pie(res_sum, labels=res_sum.index, autopct='%1.1f%%', startangle=90, colors=cols[:len(res_sum)])
-                    ax.axis('equal')
-                    st.pyplot(fig)
-                if st.button("🔄 Actualizar"): st.rerun()
-
-            elif ya_voto:
-                st.success("✅ Voto registrado. Espere indicaciones.")
-                time.sleep(5)
-                st.rerun()
-
-            elif fase == "votacion" and restante > 0:
-                reloj_area.error(f"⏱️ TIEMPO RESTANTE: {int(restante)} segundos")
-                
-                if p_id == 8: # Pregunta 9
-                    for op in opciones_p9:
-                        if st.button(f"Opción: {op}", use_container_width=True, key=f"btn_{op}"):
-                            nuevo = pd.DataFrame([{"casa": casa, "representa": repre, "p_id": p_id, "voto": op}])
-                            servidor['votos'] = pd.concat([servidor['votos'], nuevo], ignore_index=True)
-                            st.rerun()
-                else: # 1-8 y 10
-                    c1, c2 = st.columns(2)
-                    with c1:
-                        if st.button("✅ SÍ", use_container_width=True, key="btn_si_v"):
-                            nuevo = pd.DataFrame([{"casa": casa, "representa": repre, "p_id": p_id, "voto": "SÍ"}])
-                            servidor['votos'] = pd.concat([servidor['votos'], nuevo], ignore_index=True)
-                            st.balloons()
-                            st.rerun()
-                    with c2:
-                        if st.button("❌ NO", use_container_width=True, key="btn_no_v"):
-                            nuevo = pd.DataFrame([{"casa": casa, "representa": repre, "p_id": p_id, "voto": "NO"}])
-                            servidor['votos'] = pd.concat([servidor['votos'], nuevo], ignore_index=True)
-                            st.rerun()
-                
-                time.sleep(1)
-                st.rerun()
-            
-            else:
-                st.warning("⌛ Tiempo terminado.")
-                time.sleep(3)
-                st.rerun()
+                # --- LÓGICA DE COLORES CORREGIDA ---
+                if sel_p == 8: # Pregunta 9 (Elección Múltiple)
+                    # Forzamos orden a, b, c para que los colores Green, Blue, Red sean fijos por opción.
+                    res_sum_ord = res_sum.reindex(opciones_p9).fillna(0)
+                    colores_grafica = ['#2ecc71', '#3498db', '#e74c3c'] # Verde, Azul, Rojo
+                    current_votos = opciones_p9
+                    data_to_plot = res_sum_ord
+                else: # Standard SÍ/NO (incluye P10)
+                    # Mapa de color fijo
+                    color_map = {'SÍ': '#2ecc71', 'NO': '#e74c3c'}
+                    # Obtenemos los votos actuales, ordenados alfabéticamente (NO, SÍ
